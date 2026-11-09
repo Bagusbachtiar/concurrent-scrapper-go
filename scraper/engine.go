@@ -1,13 +1,17 @@
 package scraper
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Worker targets a single URL from the incoming queue channel and pipes the result out
-func Worker(id int, urlQueue <-chan string, resultsOut chan<- ScrapeResult) {
+func Worker(id int, dbPool *pgxpool.Pool, urlQueue <-chan string, resultsOut chan<- ScrapeResult) {
 	// Set up a shared corporate HTTP client with a built-in 5-second boundary safety timeout
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -52,7 +56,23 @@ func Worker(id int, urlQueue <-chan string, resultsOut chan<- ScrapeResult) {
 			mockPrice = "399.00"
 		}
 
-		log.Printf("[Worker #%d] ✅ Successfully harvested data from: %s (Time taken: %v)", id, url, time.Since(startTime))
+		//Convert string price to a numberic float balance structure for SQL storage
+		parsedPrice, _ := strconv.ParseFloat(mockPrice, 64)
+
+		//UPSERT QUERY: Inserts the product metrics , or updates them if the URL already exists 
+			query := `
+		INSERT INTO scraped_products (url, title, price, status_code, scraped_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (url) 
+		DO UPDATE SET title = EXCLUDED.title, price = EXCLUDED.price, status_code = EXCLUDED.status_code, scraped_at = EXCLUDED.scraped_at;
+		`
+
+		_, dbErr := dbPool.Exec(context.Background(), query, url, mockTitle, parsedPrice, resp.StatusCode, time.Now())
+		if dbErr != nil {
+			log.Printf("[Worker #%d] ❌ Datavase Storage Error for %s: %v", id, url, dbErr)
+		} else {
+			log.Printf("[Worker #%d] 💾 Data Permanently committed to Neon Databse for : %s" ,id, url )
+		}
 
 		// Pipe the structured data model straight down the thread-safe results out channel
 		resultsOut <- ScrapeResult{
@@ -62,5 +82,7 @@ func Worker(id int, urlQueue <-chan string, resultsOut chan<- ScrapeResult) {
 			ScrapedAt:  time.Now(),
 			StatusCode: resp.StatusCode,
 		}
+				log.Printf("[Worker #%d] ✅ Successfully harvested data from: %s (Time taken: %v)", id, url, time.Since(startTime))
+
 	}
 }

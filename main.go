@@ -2,17 +2,42 @@ package main
 
 import (
 	"concurrent-scraper/scraper"
+	"context"
 	"fmt"
 	"log"
 	"time"
+	"os"
+
+	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main (){
 	log.Println("🕷️ Concurrent Web Scraper Engine Initiating...")
 
-	//List of dynamic target pages to scrape across the network simultaneously
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Warning: no .env file found, reading from system hardware environtment parameters.")
+	}
+
+	dbConnectionString := os.Getenv("DATABASE_URL")
+	if dbConnectionString == ""{
+		log.Fatalf("Critical Error: DATABASE_URL is completely missing from environtment allocation")
+	}
+
+	//Connect to neon cluster
+	dbPool, err := pgxpool.New(context.Background(), dbConnectionString)
+	if err != nil {
+		log.Fatalf("Unable to allocate pool link resource: %v", err)
+	}
+	defer dbPool.Close()
+
+	if err := dbPool.Ping(context.Background()); err != nil{
+		log.Fatalf("Database cloud server handshake failed: %v", err)
+	}
+	log.Println("Successfully connected to Database")
+
 	targetURLs := []string{
-		"https://httpbin.org",
 		"https://httpbin.org",
 		"https://httpbin.org",
 		"https://httpbin.org",
@@ -38,7 +63,7 @@ func main (){
 
 	//3. Fire up our background workers concurrently using the 'go' keyword 
 	for i :=1; i <= totalWorkers; i++ {
-		go scraper.Worker (i, urlQueue, resultsOut)
+		go scraper.Worker (i, dbPool, urlQueue, resultsOut)
 	}
 
 	//4. Stand at the bottom of the results out piepline and harvest data packets as they drop out
