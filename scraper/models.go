@@ -1,4 +1,4 @@
-package craper 
+package scraper 
  
 import "time"
 
@@ -7,6 +7,6 @@ type ScrapeResult struct {
 	URL 	string	`json:"url"`
 	Title 	string 	`json:"title"`
 	Price 	string 	`jon:"price"`
-	Scrapedat	string `json:"scrapeda_at"`
+	ScrapedAt	time.Time `json:"scraped_at"`
 	StatusCode 	int 	`json:"status_code"`
 }
