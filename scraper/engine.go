@@ -5,31 +5,43 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/PuerkitoBio/goquery"
+
 )
 
 // Worker targets a single URL from the incoming queue channel and pipes the result out
 func Worker(id int, dbPool *pgxpool.Pool, urlQueue <-chan string, resultsOut chan<- ScrapeResult) {
 	// Set up a shared corporate HTTP client with a built-in 5-second boundary safety timeout
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 7 * time.Second,
 	}
 
 	// This loop keeps running, pulling tasks out of the channel until the channel is closed
 	for url := range urlQueue {
-		log.Printf("[Worker #%d] Jumping onto the internet to scan: %s", id, url)
+		log.Printf("[Worker #%d] 🕷️ Initiating live extraction sequence on: %s", id, url)
 
 		startTime := time.Now()
-		resp, err := client.Get(url)
 
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			log.Printf("[Worker #%d] Request Init Eror: %v", id, err )
+			continue
+		}
+
+		// Inject standard user-agent strings so target servers do not block our scraping requests
+		req.Header.Set("User-Agent", "Mozila/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		
+		resp, err := client.Do(req)
 		// Handle network dropout or server downtime failures gracefully
 		if err != nil {
-			log.Printf("[Worker #%d] Network Error targeting %s: %v", id, url, err)
+			log.Printf("[Worker #%d] Network Error targeting %s", id, url)
 			resultsOut <- ScrapeResult{
 				URL:        url,
-				Title:      "Failed to reach domain",
+				Title:      "Network Drop Failure",
 				Price:      "0.00",
 				ScrapedAt:  time.Now(),
 				StatusCode: 500,
@@ -37,27 +49,31 @@ func Worker(id int, dbPool *pgxpool.Pool, urlQueue <-chan string, resultsOut cha
 			continue
 		}
 
-		// Always close the response streaming body to avoid memory leaks
-		resp.Body.Close()
-
-		// Simulate dynamic item rendering extraction logic
-		var mockTitle string
-		var mockPrice string
-		
-		switch id % 3 {
-		case 0:
-			mockTitle = "M4 Max MacBook Pro 14-inch Studio Display Edition"
-			mockPrice = "1999.00"
-		case 1:
-			mockTitle = "Keychron Q1 Max Mechanical Keyboard (Custom Brown Switches)"
-			mockPrice = "210.00"
-		default:
-			mockTitle = "Sony WH-1000XM5 Wireless Noise Canceling Headphones"
-			mockPrice = "399.00"
+		if resp.StatusCode != http.StatusOK{
+			log.Printf("[Worker #%d] Warning: Server respponded with HTTP Status %d", id, resp.StatusCode)
+			resp.Body.Close()
+			continue
 		}
 
-		//Convert string price to a numberic float balance structure for SQL storage
-		parsedPrice, _ := strconv.ParseFloat(mockPrice, 64)
+		//Load the raw network streaming response HTML body into the goquery DOM document parser 
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		resp.Body.Close()// close stream immediately after reading into document node cache
+		if err != nil {
+			log.Printf("[Worker #%d] HTML Document parsing failure: %v", id, err)
+			continue
+		}  
+
+		//TARGET FIELD PARSING LOGIC:
+		//wE Target the webpage metadata title element, or look for fallback text nodes
+		extractedTitle := strings.TrimSpace(doc.Find("Title").Text())
+		if extractedTitle == ""{
+			extractedTitle = "Untitled Web Document Resource"
+		}
+
+		// Mock price selector check—if the target site has an element like '<span class="price">', 
+		// you would use: doc.Find(".price").Text()
+		extractedPriceStr := "149.99"
+		parsedPrice, _ := strconv.ParseFloat(extractedPriceStr, 64)
 
 		//UPSERT QUERY: Inserts the product metrics , or updates them if the URL already exists 
 			query := `
@@ -67,7 +83,7 @@ func Worker(id int, dbPool *pgxpool.Pool, urlQueue <-chan string, resultsOut cha
 		DO UPDATE SET title = EXCLUDED.title, price = EXCLUDED.price, status_code = EXCLUDED.status_code, scraped_at = EXCLUDED.scraped_at;
 		`
 
-		_, dbErr := dbPool.Exec(context.Background(), query, url, mockTitle, parsedPrice, resp.StatusCode, time.Now())
+		_, dbErr := dbPool.Exec(context.Background(), query, url, extractedTitle, parsedPrice, resp.StatusCode, time.Now())
 		if dbErr != nil {
 			log.Printf("[Worker #%d] ❌ Datavase Storage Error for %s: %v", id, url, dbErr)
 		} else {
@@ -77,12 +93,12 @@ func Worker(id int, dbPool *pgxpool.Pool, urlQueue <-chan string, resultsOut cha
 		// Pipe the structured data model straight down the thread-safe results out channel
 		resultsOut <- ScrapeResult{
 			URL:        url,
-			Title:      mockTitle,
-			Price:      mockPrice,
+			Title:      extractedTitle,
+			Price:      extractedPriceStr,
 			ScrapedAt:  time.Now(),
 			StatusCode: resp.StatusCode,
 		}
-				log.Printf("[Worker #%d] ✅ Successfully harvested data from: %s (Time taken: %v)", id, url, time.Since(startTime))
+				log.Printf("[Worker #%d] ✅ Successfully Finished live task parsing for %s in %v)", id, url, time.Since(startTime))
 
 	}
 }

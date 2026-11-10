@@ -38,10 +38,9 @@ func main (){
 	log.Println("Successfully connected to Database")
 
 	targetURLs := []string{
-		"https://httpbin.org",
-		"https://httpbin.org",
-		"https://httpbin.org",
-		"https://httpbin.org",
+		"https://go.dev",
+		"https://github.com",
+		"https://wikipedia.org",
 		"https://httpbin.org",
 	}
 
