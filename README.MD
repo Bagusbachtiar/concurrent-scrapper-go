@@ -46,6 +46,22 @@ Accepts a JSON array of target URLs, crawls them concurrently, saves records to 
 }
 ```
 
+#### `GET /products`
+Fetches the 20 most recently scraped records from the Neon Postgres `scraped_products` table.
+
+**Response Payload (`200 OK`):**
+```json
+[
+  {
+    "url": "https://github.com",
+    "title": "GitHub · Change is constant. GitHub keeps you ahead.",
+    "price": "149.99",
+    "scraped_at": "2026-11-12T17:22:19Z",
+    "status_code": 200
+  }
+]
+```
+
 ---
 
 ### 📊 Verified Live Server Logs

@@ -4,6 +4,7 @@ import (
 	"concurrent-scraper/scraper"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -94,6 +95,41 @@ func main() {
 		json.NewEncoder(w).Encode(response)
 
 		log.Printf("🏁 [API Response] Sent %d scraped records back to client in %v", len(collectedResults), time.Since(startTime))
+	})
+
+	// Register our GET /products API endpoint to read saved records from Neon Postgres
+	http.HandleFunc("/products", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed. Use GET.", http.StatusMethodNotAllowed)
+			return
+		}
+
+		query := `SELECT url, title, price, status_code, scraped_at FROM scraped_products ORDER BY scraped_at DESC LIMIT 20`
+		rows, err := dbPool.Query(context.Background(), query)
+		if err != nil {
+			log.Printf("❌ Database query failed: %v", err)
+			http.Error(w, "Failed to fetch products from database", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var products []scraper.ScrapeResult
+		for rows.Next() {
+			var item scraper.ScrapeResult
+			var rawPrice float64
+			if err := rows.Scan(&item.URL, &item.Title, &rawPrice, &item.StatusCode, &item.ScrapedAt); err != nil {
+				log.Printf("⚠️ Row scan error: %v", err)
+				continue
+			}
+			item.Price = fmt.Sprintf("%.2f", rawPrice)
+			products = append(products, item)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(products)
+
+		log.Printf("📤 [API Response] Returned %d saved records to client", len(products))
 	})
 
 	// Start listening on port 8080
