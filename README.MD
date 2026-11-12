@@ -1,39 +1,53 @@
-# Go High-Performance Concurrent Web Scraper & Data Ingestion Pipeline
+# Go High-Performance Concurrent Web Scraper REST API
 
-A multi-threaded, concurrent web scraping engine and data ingestion pipeline built natively in Go. This service utilizes buffered channels and lightweight worker goroutines to crawl live web endpoints simultaneously, parse raw HTML DOM elements, and stream structured metrics directly into a cloud database cluster.
+A multi-threaded, concurrent web scraping microservice and data ingestion API built natively in Go. It exposes a `POST /scrape` HTTP endpoint via Go's `net/http` library, utilizing worker goroutines, buffered channels, `goquery` for DOM parsing, and a Neon Serverless Postgres cluster for atomic data persistence.
 
 ---
 
 ### 🛠️ System Architecture & Features
 
-*   **Concurrent Worker Pool:** Spawns isolated background `goroutines` that pull target URLs from a shared queue channel, allowing multiple network requests to execute in parallel without blocking the main thread.
-*   **Thread-Safe Channel Pipelines:** Uses typed Go channels (`urlQueue` and `resultsOut`) to safely coordinate task distribution and result collection with zero race conditions.
-*   **Live HTML DOM Parsing:** Integrates `goquery` to load raw HTTP response streams and extract semantic HTML metadata (`<title>` tags) while injecting custom browser `User-Agent` headers.
-*   **Atomic Cloud Persistence:** Connects to a **Neon Serverless Postgres** cluster via `pgxpool` using simple protocol mode (`default_query_exec_mode=simple_protocol`) to execute conflict-safe `UPSERT` queries (`ON CONFLICT DO UPDATE`).
-*   **Resilient Network Boundaries:** Enforces strict HTTP client timeouts (`7s`) and immediate response body closures (`resp.Body.Close()`) to prevent memory leaks and hanging threads.
+*   **RESTful HTTP Microservice (`net/http`):** Listens on port `8080`, handling JSON payloads (`ScrapeRequest`) and returning structured metrics (`ScrapeResponse`).
+*   **Dynamic Concurrent Worker Pool:** Uses background `goroutines` and typed channels (`urlQueue`, `resultsOut`) for race-condition-free parallel processing.
+*   **Live HTML DOM Parsing:** Extracts semantic metadata (such as `<title>` tags) and custom `User-Agent` headers using `goquery`.
+*   **Atomic Cloud Persistence:** Connects to Neon Serverless Postgres via `pgxpool` (`default_query_exec_mode=simple_protocol`) to execute `UPSERT` queries.
 
 ---
 
-### 📊 Verified Live Execution Logs
+### 🔌 API Endpoint Usage
 
-During live test runs crawling production web endpoints, the 3-worker pool harvested live HTML titles and committed all records to Neon Postgres in **1.23 seconds**:
+#### `POST /scrape`
+Accepts a JSON array of target URLs, crawls them concurrently, saves records to Neon Postgres, and returns execution metrics.
 
-```text
-🕷️ Concurrent Web Scraper Engine Initiating...
-Successfully connected to Database
-🚀 Spawning a thread-safe worker pool of 3 concurrent goroutines...
-📥 Collecting extracted metrics data packets streaming out of channels...
-[Worker #1] 🕷️ Initiating live extraction sequence on: https://go.dev
-[Worker #2] 🕷️ Initiating live extraction sequence on: https://github.com
-[Worker #3] 🕷️ Initiating live extraction sequence on: https://wikipedia.org
-[Worker #2] 💾 Data Permanently committed to Neon Database for : https://github.com
-[Worker #2] ✅ Successfully Finished live task parsing for https://github.com in 326.7134ms
-[Worker #3] 💾 Data Permanently committed to Neon Database for : https://wikipedia.org
-[Worker #3] ✅ Successfully Finished live task parsing for https://wikipedia.org in 377.1769ms
-[Worker #1] 💾 Data Permanently committed to Neon Database for : https://go.dev
-[Worker #1] ✅ Successfully Finished live task parsing for https://go.dev in 576.0659ms
-[Worker #2] 💾 Data Permanently committed to Neon Database for : https://httpbin.org
-[Worker #2] ✅ Successfully Finished live task parsing for https://httpbin.org in 907.9938ms
-
-🏁 Job Finished. Successfully crawled 4 high-latency pages in: 1.2362106s
+**Request Payload:**
+```json
+{
+  "urls": [
+    "https://go.dev",
+    "https://github.com",
+    "https://ycombinator.com"
+  ]
+}
 ```
+
+**Response Payload (`200 OK`):**
+```json
+{
+  "total_scraped": 3,
+  "time_taken": "353.8815ms",
+  "results": [
+    {
+      "url": "https://github.com",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead.",
+      "price": "149.99",
+      "scraped_at": "2026-11-12T17:22:19Z",
+      "status_code": 200
+    }
+  ]
+}
+```
+
+---
+
+### 📊 Verified Live Server Logs
+
+Execution logs demonstrating concurrent URL scraping, database commit operations, and response timing can be found in your local server output, completing a 3-URL batch in ~353ms.
