@@ -13,7 +13,7 @@ import (
 
 )
 
-// Worker targets a single URL from the incoming queue channel and pipes the result out
+// Worker targehts a single URL from the incoming queue channel and pipes the result out
 func Worker(id int, dbPool *pgxpool.Pool, urlQueue <-chan string, resultsOut chan<- ScrapeResult) {
 	// Set up a shared corporate HTTP client with a built-in 5-second boundary safety timeout
 	client := &http.Client{
